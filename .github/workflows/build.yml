@@ -2,7 +2,7 @@ name: Watch Edit Releases and Build .deb Packages
 
 on:
   schedule:
-    - cron: '0 0 * * *'
+    - cron: '0 0 * * *'  # Every day at midnight UTC
   workflow_dispatch:
 
 jobs:
@@ -84,21 +84,20 @@ jobs:
               usr/bin/edit
           mv edit*.deb edit-${VERSION#v}-$deb_arch.deb
 
-      - name: Upload .deb artifact
+      - name: Upload .deb artifact (per-arch)
         uses: actions/upload-artifact@v4
         with:
-          name: edit-debs
+          name: edit-debs-${{ matrix.arch }}
           path: edit-*.deb
 
   release:
     needs: [check-release, build-debs]
     runs-on: ubuntu-latest
     steps:
-      - name: Download artifacts
+      - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
-          name: edit-debs
-          path: .
+          path: all-debs
 
       - name: Create Git tag
         run: |
@@ -112,4 +111,4 @@ jobs:
         with:
           tag_name: ${{ needs.check-release.outputs.new_version }}
           name: "Edit ${{ needs.check-release.outputs.new_version }}"
-          files: edit-*.deb
+          files: all-debs/**/*.deb
