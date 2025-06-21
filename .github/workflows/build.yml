@@ -94,18 +94,21 @@ jobs:
     needs: [check-release, build-debs]
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+  
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
           path: all-debs
-
+  
       - name: Create Git tag
         run: |
           git config user.name "GitHub Actions"
           git config user.email "actions@github.com"
           git tag "${{ needs.check-release.outputs.new_version }}"
           git push origin "${{ needs.check-release.outputs.new_version }}"
-
+  
       - name: Publish GitHub release
         uses: softprops/action-gh-release@v1
         with:
