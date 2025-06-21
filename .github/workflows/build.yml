@@ -1,0 +1,118 @@
+name: Watch Edit Releases and Build .deb Packages
+
+on:
+  schedule:
+    - cron: '0 0 * * *'  # Daily
+  workflow_dispatch:
+
+jobs:
+  check-release:
+    runs-on: ubuntu-latest
+    outputs:
+      new_version: ${{ steps.compare.outputs.new_version }}
+      is_new: ${{ steps.compare.outputs.is_new }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Get latest upstream release
+        id: latest
+        run: |
+          tag=$(curl -s https://api.github.com/repos/microsoft/edit/releases/latest | jq -r .tag_name)
+          echo "latest_tag=$tag" >> $GITHUB_OUTPUT
+
+      - name: Get latest local tag
+        id: local
+        run: |
+          tag=$(git tag --sort=-creatordate | grep '^v' | head -n 1 || echo "v0.0.0")
+          echo "local_tag=$tag" >> $GITHUB_OUTPUT
+
+      - name: Compare versions
+        id: compare
+        run: |
+          latest="${{ steps.latest.outputs.latest_tag }}"
+          local="${{ steps.local.outputs.local_tag }}"
+          if [ "$latest" = "$local" ]; then
+            echo "No new version."
+            echo "is_new=false" >> $GITHUB_OUTPUT
+          else
+            echo "New version: $latest"
+            echo "is_new=true" >> $GITHUB_OUTPUT
+            echo "new_version=$latest" >> $GITHUB_OUTPUT
+          fi
+
+  build-debs:
+    needs: check-release
+    if: needs.check-release.outputs.is_new == 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        arch: [x86_64, aarch64]
+
+    env:
+      VERSION: ${{ needs.check-release.outputs.new_version }}
+
+    steps:
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ruby-dev build-essential zstd jq \
+          && sudo gem install --no-document fpm
+
+      - name: Download and extract Edit for ${{ matrix.arch }}
+        run: |
+          version="${VERSION#v}"
+          url="https://github.com/microsoft/edit/releases/download/${VERSION}/edit-${version}-${{ matrix.arch }}-linux-gnu.tar.zst"
+          curl -L -o edit.tar.zst "$url"
+          mkdir -p stage/usr/bin
+          tar --use-compress-program=unzstd -xf edit.tar.zst
+          mv edit stage/usr/bin/
+          chmod +x stage/usr/bin/edit
+
+      - name: Build .deb package
+        run: |
+          arch="${{ matrix.arch }}"
+          case "$arch" in
+            x86_64) deb_arch="amd64" ;;
+            aarch64) deb_arch="arm64" ;;
+          esac
+          fpm -s dir -t deb \
+            -n edit \
+            -v "${VERSION#v}" \
+            --architecture "$deb_arch" \
+            --prefix /usr \
+            --description "Microsoft Edit CLI Editor" \
+            --maintainer "automated@github.actions" \
+            -C stage \
+            usr/bin/edit
+          mv edit*.deb edit-${VERSION#v}-$deb_arch.deb
+
+      - name: Upload .deb as artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: edit-debs
+          path: edit-*.deb
+
+  release:
+    needs: [check-release, build-debs]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all .deb artifacts
+        uses: actions/download-artifact@v3
+        with:
+          name: edit-debs
+
+      - name: Create Git Tag
+        run: |
+          git config user.name "GitHub Actions"
+          git config user.email "actions@github.com"
+          git tag "${{ needs.check-release.outputs.new_version }}"
+          git push origin "${{ needs.check-release.outputs.new_version }}"
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ needs.check-release.outputs.new_version }}
+          name: "Edit ${{ needs.check-release.outputs.new_version }}"
+          files: |
+            edit-*.deb
