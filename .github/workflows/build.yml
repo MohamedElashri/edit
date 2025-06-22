@@ -12,29 +12,22 @@ jobs:
       new_version: ${{ steps.compare.outputs.new_version }}
       is_new: ${{ steps.compare.outputs.is_new }}
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Get latest upstream release
-        id: latest
+      - name: Get latest upstream release tag
+        id: upstream
         run: |
           tag=$(curl -s https://api.github.com/repos/microsoft/edit/releases/latest | jq -r .tag_name)
           echo "latest_tag=$tag" >> $GITHUB_OUTPUT
 
-      - name: Get latest local tag
-        id: local
-        run: |
-          tag=$(git tag --sort=-creatordate | grep '^v' | head -n 1 || echo "v0.0.0")
-          echo "local_tag=$tag" >> $GITHUB_OUTPUT
-
-      - name: Compare versions
+      - name: Check if tag already exists in our repo
         id: compare
         run: |
-          latest="${{ steps.latest.outputs.latest_tag }}"
-          local="${{ steps.local.outputs.local_tag }}"
-          if [ "$latest" = "$local" ]; then
+          latest="${{ steps.upstream.outputs.latest_tag }}"
+          exists=$(git ls-remote --tags origin "$latest" | wc -l)
+          if [ "$exists" -gt 0 ]; then
+            echo "No new version. Already built: $latest"
             echo "is_new=false" >> $GITHUB_OUTPUT
           else
+            echo "New version found: $latest"
             echo "is_new=true" >> $GITHUB_OUTPUT
             echo "new_version=$latest" >> $GITHUB_OUTPUT
           fi
@@ -100,6 +93,7 @@ jobs:
 
   release:
     needs: [check-release, build-debs]
+    if: needs.check-release.outputs.is_new == 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
