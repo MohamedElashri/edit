@@ -79,7 +79,7 @@ jobs:
       - name: Generate SHA256 hash
         run: |
           for file in edit-*.deb; do
-            sha256sum "$file" > "$file.sha256"
+            sha256sum "$file" > "$file".sha256
           done
 
       - name: Upload .deb artifacts
@@ -139,7 +139,7 @@ jobs:
 
       - name: Generate SHA256 hash
         run: |
-          sha256sum edit-*.pkg > edit-${VERSION#v}-arm64.pkg.sha256
+          shasum -a 256 edit-*.pkg > edit-${VERSION#v}-arm64.pkg.sha256
 
       - name: Upload .pkg artifact
         uses: actions/upload-artifact@v4
