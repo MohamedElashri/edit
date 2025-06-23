@@ -150,7 +150,7 @@ jobs:
             *.sha256
 
   release:
-    needs: [build-debs, build-macos]
+    needs: [check-release, build-debs, build-macos]
     if: needs.check-release.outputs.is_new == 'true'
     runs-on: ubuntu-latest
     steps:
