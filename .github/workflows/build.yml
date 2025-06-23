@@ -53,13 +53,7 @@ jobs:
             pkg: deb
             pkg_arch: arm64
             prefix: /usr/bin
-          # macOS x86_64
-          - os: macos-latest
-            target: x86_64-apple-darwin
-            pkg: osxpkg
-            pkg_arch: x86_64
-            prefix: /usr/local/bin
-          # macOS arm64
+          # macOS Apple Silicon only
           - os: macos-latest
             target: aarch64-apple-darwin
             pkg: osxpkg
@@ -68,6 +62,7 @@ jobs:
 
     env:
       VERSION: ${{ needs.check-release.outputs.new_version }}
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -79,7 +74,7 @@ jobs:
           override: true
 
       - name: Build release binary
-        run: cargo build --config .cargo/release.toml --release --target ${{ matrix.target }}
+        run: cargo build --release --target ${{ matrix.target }}
 
       - name: Install packaging tools
         run: |
@@ -95,8 +90,7 @@ jobs:
       - name: Stage binary
         run: |
           mkdir -p stage${{ matrix.prefix }}
-          cp target/${{ matrix.target }}/release/edit \
-             stage${{ matrix.prefix }}/
+          cp target/${{ matrix.target }}/release/edit stage${{ matrix.prefix }}/
 
       - name: Package
         run: |
@@ -119,13 +113,13 @@ jobs:
                 --prefix "${{ matrix.prefix }}" \
                 --description "Microsoft Edit CLI editor" \
                 --maintainer "automated@github.actions" \
-                -C stage ${matrix.prefix#/}"/edit"
+                -C stage "${{ matrix.prefix }}/edit"
             mv edit-*.pkg edit-${version}-${{ matrix.pkg_arch }}.pkg
           fi
 
       - name: Generate SHA256 checksum
         run: |
-          for file in edit-*.$( [[ "${{ matrix.pkg }}"=="deb" ]] && echo deb || echo pkg ); do
+          for file in edit-*.$( [[ "${{ matrix.pkg }}" == "deb" ]] && echo deb || echo pkg ); do
             sha256sum "$file" > "$file".sha256
           done
 
@@ -134,7 +128,7 @@ jobs:
         with:
           name: edit-${{ matrix.pkg }}-${{ matrix.pkg_arch }}
           path: |
-            edit-*.$( [[ "${{ matrix.pkg }}"=="deb" ]] && echo deb || echo pkg )
+            edit-*.$( [[ "${{ matrix.pkg }}" == "deb" ]] && echo deb || echo pkg )
             *.sha256
 
   release:
