@@ -2,7 +2,7 @@ name: Watch Edit Releases and Build Packages
 
 on:
   schedule:
-    - cron: '0 0 * * *'    # Daily at midnight UTC
+    - cron: '0 0 * * *'
   workflow_dispatch:
 
 jobs:
@@ -18,7 +18,7 @@ jobs:
           echo "latest_tag=$(curl -s https://api.github.com/repos/microsoft/edit/releases/latest \
             | jq -r .tag_name)" >> $GITHUB_OUTPUT
 
-      - name: Checkout our repo
+      - name: Checkout this repo
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
@@ -41,19 +41,16 @@ jobs:
     strategy:
       matrix:
         include:
-          # Linux x86_64
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
             pkg: deb
             pkg_arch: amd64
             prefix: /usr/bin
-          # Linux aarch64
           - os: ubuntu-latest
             target: aarch64-unknown-linux-gnu
             pkg: deb
             pkg_arch: arm64
             prefix: /usr/bin
-          # macOS Apple Silicon only
           - os: macos-latest
             target: aarch64-apple-darwin
             pkg: osxpkg
@@ -64,8 +61,12 @@ jobs:
       VERSION: ${{ needs.check-release.outputs.new_version }}
 
     steps:
-      - name: Checkout code
+      - name: Checkout this repo
         uses: actions/checkout@v4
+
+      - name: Clone upstream Edit at ${{ env.VERSION }}
+        run: |
+          git clone --depth 1 --branch "${VERSION}" https://github.com/microsoft/edit.git upstream
 
       - name: Set up Rust (nightly)
         uses: actions-rs/toolchain@v1
@@ -74,6 +75,7 @@ jobs:
           override: true
 
       - name: Build release binary
+        working-directory: upstream
         run: cargo build --release --target ${{ matrix.target }}
 
       - name: Install packaging tools
@@ -90,7 +92,8 @@ jobs:
       - name: Stage binary
         run: |
           mkdir -p stage${{ matrix.prefix }}
-          cp target/${{ matrix.target }}/release/edit stage${{ matrix.prefix }}/
+          cp upstream/target/${{ matrix.target }}/release/edit \
+             stage${{ matrix.prefix }}/
 
       - name: Package
         run: |
@@ -119,7 +122,8 @@ jobs:
 
       - name: Generate SHA256 checksum
         run: |
-          for file in edit-*.$( [[ "${{ matrix.pkg }}" == "deb" ]] && echo deb || echo pkg ); do
+          ext=$( [[ "${{ matrix.pkg }}" == "deb" ]] && echo deb || echo pkg )
+          for file in edit-*."$ext"; do
             sha256sum "$file" > "$file".sha256
           done
 
