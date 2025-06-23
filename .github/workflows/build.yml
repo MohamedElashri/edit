@@ -41,14 +41,14 @@ jobs:
     strategy:
       matrix:
         include:
-          # Linux x86_64: use upstream binary
+          # Linux x86_64: package upstream binary
           - os: ubuntu-latest
             arch: x86_64
             pkg: deb
             pkg_arch: amd64
             prefix: /usr/bin
             source: false
-          # Linux aarch64: use upstream binary
+          # Linux aarch64: package upstream binary
           - os: ubuntu-latest
             arch: aarch64
             pkg: deb
@@ -77,7 +77,7 @@ jobs:
             sudo apt-get install -y ruby-dev build-essential zstd jq
             sudo gem install --no-document fpm
           else
-            brew install ruby
+            brew install ruby zstd
             gem install --no-document fpm
           fi
 
@@ -92,12 +92,11 @@ jobs:
             rustup target add ${{ matrix.arch }}
             cargo build --release --target ${{ matrix.arch }}
             cp target/${{ matrix.arch }}/release/edit \
-               ../stage${{ matrix.prefix }}/
+               ../stage${{ matrix.prefix }}/edit
           else
             url="https://github.com/microsoft/edit/releases/download/${VERSION}/edit-${version}-${{ matrix.arch }}-linux-gnu.tar.zst"
             curl -L -o edit.tar.zst "$url"
-            tar --use-compress-program=unzstd -xf edit.tar.zst
-            mv edit stage${{ matrix.prefix }}/edit
+            unzstd -c edit.tar.zst | tar -xf - -C stage${{ matrix.prefix }}
             chmod +x stage${{ matrix.prefix }}/edit
           fi
 
@@ -115,6 +114,8 @@ jobs:
                 -C stage usr/bin/edit
             mv edit_*.deb edit-${version}-${{ matrix.pkg_arch }}.deb
           else
+            # strip leading slash from prefix for fpm path
+            rel_prefix="${{ matrix.prefix#/}}"
             fpm -s dir -t osxpkg \
                 -n edit \
                 -v "$version" \
@@ -122,7 +123,7 @@ jobs:
                 --prefix "${{ matrix.prefix }}" \
                 --description "Microsoft Edit CLI editor" \
                 --maintainer "automated@github.actions" \
-                -C stage usr/local/bin/edit
+                -C stage "${rel_prefix}/edit"
             mv edit-*.pkg edit-${version}-${{ matrix.pkg_arch }}.pkg
           fi
 
