@@ -1,8 +1,8 @@
-name: Watch Edit Releases and Build .deb Packages
+name: Watch Edit Releases and Build Packages
 
 on:
   schedule:
-    - cron: '0 0 * * *'  # Daily at midnight UTC
+    - cron: '0 0 * * *'    # Daily at midnight UTC
   workflow_dispatch:
 
 jobs:
@@ -10,106 +10,148 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       new_version: ${{ steps.compare.outputs.new_version }}
-      is_new: ${{ steps.compare.outputs.is_new }}
+      is_new:       ${{ steps.compare.outputs.is_new }}
     steps:
       - name: Fetch latest upstream release tag
         id: fetch
         run: |
-          latest_tag=$(curl -s https://api.github.com/repos/microsoft/edit/releases/latest | jq -r .tag_name)
-          echo "latest_tag=$latest_tag" >> $GITHUB_OUTPUT
+          echo "latest_tag=$(curl -s https://api.github.com/repos/microsoft/edit/releases/latest \
+            | jq -r .tag_name)" >> $GITHUB_OUTPUT
 
-      - name: Checkout our repository
+      - name: Checkout our repo
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # fetch full history to get tags
+          fetch-depth: 0
 
       - name: Compare with existing tags
         id: compare
         run: |
           latest="${{ steps.fetch.outputs.latest_tag }}"
           if git rev-parse "refs/tags/$latest" >/dev/null 2>&1; then
-            echo "Version $latest already exists."
             echo "is_new=false" >> $GITHUB_OUTPUT
           else
-            echo "New version $latest detected."
             echo "is_new=true" >> $GITHUB_OUTPUT
             echo "new_version=$latest" >> $GITHUB_OUTPUT
           fi
 
-  build-debs:
+  build:
     needs: check-release
     if: needs.check-release.outputs.is_new == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        arch: [x86_64, aarch64]
+        include:
+          # Linux x86_64
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            pkg: deb
+            pkg_arch: amd64
+            prefix: /usr/bin
+          # Linux aarch64
+          - os: ubuntu-latest
+            target: aarch64-unknown-linux-gnu
+            pkg: deb
+            pkg_arch: arm64
+            prefix: /usr/bin
+          # macOS x86_64
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            pkg: osxpkg
+            pkg_arch: x86_64
+            prefix: /usr/local/bin
+          # macOS arm64
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            pkg: osxpkg
+            pkg_arch: arm64
+            prefix: /usr/local/bin
+
     env:
       VERSION: ${{ needs.check-release.outputs.new_version }}
     steps:
-      - name: Install dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y ruby-dev build-essential zstd jq
-          sudo gem install --no-document fpm
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-      - name: Download and extract Edit
+      - name: Set up Rust (nightly)
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: nightly
+          override: true
+
+      - name: Build release binary
+        run: cargo build --config .cargo/release.toml --release --target ${{ matrix.target }}
+
+      - name: Install packaging tools
+        run: |
+          if [[ "${{ matrix.pkg }}" == "deb" ]]; then
+            sudo apt-get update
+            sudo apt-get install -y ruby-dev build-essential zstd
+            sudo gem install --no-document fpm
+          else
+            brew install ruby
+            gem install --no-document fpm
+          fi
+
+      - name: Stage binary
+        run: |
+          mkdir -p stage${{ matrix.prefix }}
+          cp target/${{ matrix.target }}/release/edit \
+             stage${{ matrix.prefix }}/
+
+      - name: Package
         run: |
           version="${VERSION#v}"
-          url="https://github.com/microsoft/edit/releases/download/${VERSION}/edit-${version}-${{ matrix.arch }}-linux-gnu.tar.zst"
-          curl -L -o edit.tar.zst "$url"
-          mkdir -p stage/usr/bin
-          tar --use-compress-program=unzstd -xf edit.tar.zst
-          mv edit stage/usr/bin/
-          chmod +x stage/usr/bin/edit
+          if [[ "${{ matrix.pkg }}" == "deb" ]]; then
+            fpm -s dir -t deb \
+                -n edit \
+                -v "$version" \
+                --architecture "${{ matrix.pkg_arch }}" \
+                --prefix /usr \
+                --description "Microsoft Edit CLI editor" \
+                --maintainer "automated@github.actions" \
+                -C stage usr/bin/edit
+            mv edit_*.deb edit-${version}-${{ matrix.pkg_arch }}.deb
+          else
+            fpm -s dir -t osxpkg \
+                -n edit \
+                -v "$version" \
+                --architecture "${{ matrix.pkg_arch }}" \
+                --prefix "${{ matrix.prefix }}" \
+                --description "Microsoft Edit CLI editor" \
+                --maintainer "automated@github.actions" \
+                -C stage ${matrix.prefix#/}"/edit"
+            mv edit-*.pkg edit-${version}-${{ matrix.pkg_arch }}.pkg
+          fi
 
-      - name: Build .deb
+      - name: Generate SHA256 checksum
         run: |
-          case "${{ matrix.arch }}" in
-            x86_64) deb_arch=amd64 ;;
-            aarch64) deb_arch=arm64 ;;
-          esac
-          fpm -s dir -t deb \
-              -n edit \
-              -v "${VERSION#v}" \
-              --architecture "$deb_arch" \
-              --prefix /usr \
-              --description "Microsoft Edit CLI Editor" \
-              --maintainer "automated@github.actions" \
-              -C stage \
-              usr/bin/edit
-          mv edit*.deb edit-${VERSION#v}-$deb_arch.deb
-
-      - name: Generate SHA256 hash
-        run: |
-          for file in edit-*.deb; do
-            sha256sum "$file" > "$file.sha256"
+          for file in edit-*.$( [[ "${{ matrix.pkg }}"=="deb" ]] && echo deb || echo pkg ); do
+            sha256sum "$file" > "$file".sha256
           done
 
-      - name: Upload .deb and .sha256 artifacts
+      - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: edit-debs-${{ matrix.arch }}
+          name: edit-${{ matrix.pkg }}-${{ matrix.pkg_arch }}
           path: |
-            edit-*.deb
-            edit-*.sha256
+            edit-*.$( [[ "${{ matrix.pkg }}"=="deb" ]] && echo deb || echo pkg )
+            *.sha256
 
   release:
-    needs: [check-release, build-debs]
+    needs: [check-release, build]
     if: needs.check-release.outputs.is_new == 'true'
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
-          path: all-debs
+          path: all-artifacts
 
-      - name: Flatten all artifacts
+      - name: Flatten artifacts
         run: |
-          find all-debs -type f -name '*.deb' -exec mv {} all-debs/ \;
-          find all-debs -type f -name '*.sha256' -exec mv {} all-debs/ \;
+          find all-artifacts -type f -exec mv {} all-artifacts/ \;
 
       - name: Create Git tag
         run: |
@@ -123,4 +165,4 @@ jobs:
         with:
           tag_name: ${{ needs.check-release.outputs.new_version }}
           name: "Edit ${{ needs.check-release.outputs.new_version }}"
-          files: all-debs/*.*
+          files: all-artifacts/*.deb,all-artifacts/*.pkg,all-artifacts/*.sha256
