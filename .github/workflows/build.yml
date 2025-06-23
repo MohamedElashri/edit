@@ -79,13 +79,13 @@ jobs:
       - name: Generate SHA256 hash
         run: |
           for file in edit-*.deb; do
-            sha256sum "$file" > "$file".sha256
+            sha256sum "$file" > "$file.sha256"
           done
 
       - name: Upload .deb artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: edit-debs
+          name: edit-debs-${{ matrix.arch }}
           path: |
             edit-*.deb
             *.sha256
@@ -112,6 +112,7 @@ jobs:
         with:
           toolchain: nightly
           override: true
+
       - name: Build release binary
         working-directory: upstream
         run: |
@@ -143,7 +144,7 @@ jobs:
       - name: Upload .pkg artifact
         uses: actions/upload-artifact@v4
         with:
-          name: edit-macos
+          name: edit-macos-arm64
           path: |
             edit-*.pkg
             *.sha256
@@ -176,4 +177,4 @@ jobs:
         with:
           tag_name: ${{ needs.check-release.outputs.new_version }}
           name: "Edit ${{ needs.check-release.outputs.new_version }}"
-          files: all-artifacts/*.*  
+          files: all-artifacts/*.*
