@@ -161,7 +161,6 @@ jobs:
           name:     "Edit ${{ needs.check-release.outputs.new_version }}"
           files:    |
             all-artifacts/edit-*.deb,
-            all-artifacts/edit-*.deb.sha256,
-            all-artifacts/edit-*.deb.sha256,  # duplicate for both archs
+            all-artifacts/*.sha256,
             all-artifacts/edit-*-macos-arm64,
             all-artifacts/edit-*-macos-arm64.sha256
