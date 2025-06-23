@@ -97,21 +97,14 @@ jobs:
     env:
       VERSION: ${{ needs.check-release.outputs.new_version }}
     steps:
-      - name: Install dependencies
-        run: |
-          brew update
-          brew install ruby
-          gem install --no-document fpm
-
-      - name: Clone Edit source
-        run: |
-          git clone --depth 1 --branch "${VERSION}" https://github.com/microsoft/edit.git upstream
-
-      - name: Set up Rust (nightly) and build
+      - name: Install Rust nightly
         uses: actions-rs/toolchain@v1
         with:
           toolchain: nightly
           override: true
+
+      - name: Clone Edit source
+        run: git clone --depth 1 --branch "${VERSION}" https://github.com/microsoft/edit.git upstream
 
       - name: Build release binary
         working-directory: upstream
@@ -119,35 +112,21 @@ jobs:
           rustup target add aarch64-apple-darwin
           cargo build --release --target aarch64-apple-darwin
 
-      - name: Stage binary
+      - name: Gather binary
         run: |
-          mkdir -p stage/usr/local/bin
-          cp upstream/target/aarch64-apple-darwin/release/edit stage/usr/local/bin/
+          cp upstream/target/aarch64-apple-darwin/release/edit edit
 
-      - name: Package .pkg
+      - name: Generate SHA256 checksum
         run: |
-          version="${VERSION#v}"
-          fpm -s dir -t osxpkg \
-              -n edit \
-              -v "$version" \
-              --architecture arm64 \
-              --prefix /usr/local \
-              --description "Microsoft Edit CLI editor" \
-              --maintainer "automated@github.actions" \
-              -C stage usr/local/bin/edit
-          mv edit-*.pkg edit-${version}-arm64.pkg
+          shasum -a 256 edit > edit.sha256
 
-      - name: Generate SHA256 hash
-        run: |
-          shasum -a 256 edit-*.pkg > edit-${VERSION#v}-arm64.pkg.sha256
-
-      - name: Upload .pkg artifact
+      - name: Upload `edit` binary
         uses: actions/upload-artifact@v4
         with:
           name: edit-macos-arm64
           path: |
-            edit-*.pkg
-            *.sha256
+            edit
+            edit.sha256
 
   release:
     needs: [check-release, build-debs, build-macos]
