@@ -22,7 +22,7 @@ jobs:
       - name: Checkout our repository
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # fetch full history to get tags
+          fetch-depth: 0
 
       - name: Compare with existing tags
         id: compare
@@ -128,8 +128,8 @@ jobs:
         with:
           name: edit-macos-arm64
           path: |
-            edit-${VERSION#v}-macos-arm64
-            edit-${VERSION#v}-macos-arm64.sha256
+            edit-*-macos-arm64
+            edit-*-macos-arm64.sha256
 
   release:
     needs: [check-release, build-debs, build-macos]
@@ -162,5 +162,6 @@ jobs:
           files:    |
             all-artifacts/edit-*.deb,
             all-artifacts/edit-*.deb.sha256,
+            all-artifacts/edit-*.deb.sha256,  # duplicate for both archs
             all-artifacts/edit-*-macos-arm64,
             all-artifacts/edit-*-macos-arm64.sha256
