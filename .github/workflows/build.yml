@@ -15,13 +15,14 @@ jobs:
       - name: Fetch latest upstream release tag
         id: fetch
         run: |
-          echo "latest_tag=$(curl -s https://api.github.com/repos/microsoft/edit/releases/latest \
-            | jq -r .tag_name)" >> $GITHUB_OUTPUT
+          latest_tag=$(curl -s https://api.github.com/repos/microsoft/edit/releases/latest \
+            | jq -r .tag_name)
+          echo "latest_tag=$latest_tag" >> $GITHUB_OUTPUT
 
-      - name: Checkout this repo
+      - name: Checkout our repository
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0
+          fetch-depth: 0  # fetch full history to get tags
 
       - name: Compare with existing tags
         id: compare
@@ -44,7 +45,44 @@ jobs:
     env:
       VERSION: ${{ needs.check-release.outputs.new_version }}
     steps:
-      # … (unchanged) …
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ruby-dev build-essential zstd jq
+          sudo gem install --no-document fpm
+
+      - name: Download and extract Edit
+        run: |
+          version="${VERSION#v}"
+          url="https://github.com/microsoft/edit/releases/download/${VERSION}/edit-${version}-${{ matrix.arch }}-linux-gnu.tar.zst"
+          curl -L -o edit.tar.zst "$url"
+          mkdir -p stage/usr/bin
+          tar --use-compress-program=unzstd -xf edit.tar.zst
+          mv edit stage/usr/bin/
+          chmod +x stage/usr/bin/edit
+
+      - name: Build .deb
+        run: |
+          case "${{ matrix.arch }}" in
+            x86_64) deb_arch=amd64 ;;
+            aarch64) deb_arch=arm64 ;;
+          esac
+          fpm -s dir -t deb \
+              -n edit \
+              -v "${VERSION#v}" \
+              --architecture "$deb_arch" \
+              --prefix /usr \
+              --description "Microsoft Edit CLI editor" \
+              --maintainer "automated@github.actions" \
+              -C stage usr/bin/edit
+          mv edit_*.deb edit-${VERSION#v}-$deb_arch.deb
+
+      - name: Generate SHA256 hash
+        run: |
+          for file in edit-*.deb; do
+            sha256sum "$file" > "$file.sha256"
+          done
+
       - name: Upload .deb artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -111,7 +149,7 @@ jobs:
 
       - name: Create Git tag
         run: |
-          git config user.name  "GitHub Actions"
+          git config user.name "GitHub Actions"
           git config user.email "actions@github.com"
           git tag "${{ needs.check-release.outputs.new_version }}"
           git push origin "${{ needs.check-release.outputs.new_version }}"
