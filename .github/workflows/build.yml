@@ -2,7 +2,7 @@ name: Watch Edit Releases and Build .deb Packages
 
 on:
   schedule:
-    - cron: '0 0 * * *'  # Every day at midnight UTC
+    - cron: '0 0 * * *'  # Daily at midnight UTC
   workflow_dispatch:
 
 jobs:
@@ -12,22 +12,26 @@ jobs:
       new_version: ${{ steps.compare.outputs.new_version }}
       is_new: ${{ steps.compare.outputs.is_new }}
     steps:
-      - name: Get latest upstream release tag
-        id: upstream
+      - name: Fetch latest upstream release tag
+        id: fetch
         run: |
-          tag=$(curl -s https://api.github.com/repos/microsoft/edit/releases/latest | jq -r .tag_name)
-          echo "latest_tag=$tag" >> $GITHUB_OUTPUT
+          latest_tag=$(curl -s https://api.github.com/repos/microsoft/edit/releases/latest | jq -r .tag_name)
+          echo "latest_tag=$latest_tag" >> $GITHUB_OUTPUT
 
-      - name: Check if tag already exists in our repo
+      - name: Checkout our repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # fetch full history to get tags
+
+      - name: Compare with existing tags
         id: compare
         run: |
-          latest="${{ steps.upstream.outputs.latest_tag }}"
-          exists=$(git ls-remote --tags origin "$latest" | wc -l)
-          if [ "$exists" -gt 0 ]; then
-            echo "No new version. Already built: $latest"
+          latest="${{ steps.fetch.outputs.latest_tag }}"
+          if git rev-parse "refs/tags/$latest" >/dev/null 2>&1; then
+            echo "Version $latest already exists."
             echo "is_new=false" >> $GITHUB_OUTPUT
           else
-            echo "New version found: $latest"
+            echo "New version $latest detected."
             echo "is_new=true" >> $GITHUB_OUTPUT
             echo "new_version=$latest" >> $GITHUB_OUTPUT
           fi
@@ -39,10 +43,8 @@ jobs:
     strategy:
       matrix:
         arch: [x86_64, aarch64]
-
     env:
       VERSION: ${{ needs.check-release.outputs.new_version }}
-
     steps:
       - name: Install dependencies
         run: |
@@ -98,24 +100,24 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-  
+
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
           path: all-debs
-  
+
       - name: Flatten all artifacts
         run: |
           find all-debs -type f -name '*.deb' -exec mv {} all-debs/ \;
           find all-debs -type f -name '*.sha256' -exec mv {} all-debs/ \;
-  
+
       - name: Create Git tag
         run: |
           git config user.name "GitHub Actions"
           git config user.email "actions@github.com"
           git tag "${{ needs.check-release.outputs.new_version }}"
           git push origin "${{ needs.check-release.outputs.new_version }}"
-  
+
       - name: Publish GitHub release
         uses: softprops/action-gh-release@v1
         with:
