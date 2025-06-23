@@ -96,10 +96,9 @@ jobs:
           else
             url="https://github.com/microsoft/edit/releases/download/${VERSION}/edit-${version}-${{ matrix.arch }}-linux-gnu.tar.zst"
             curl -L -o edit.tar.zst "$url"
-            mkdir -p stage/usr/bin
             tar --use-compress-program=unzstd -xf edit.tar.zst
-            mv edit stage/usr/bin/edit
-            chmod +x stage/usr/bin/edit
+            mv edit stage${{ matrix.prefix }}/edit
+            chmod +x stage${{ matrix.prefix }}/edit
           fi
 
       - name: Package
@@ -123,7 +122,7 @@ jobs:
                 --prefix "${{ matrix.prefix }}" \
                 --description "Microsoft Edit CLI editor" \
                 --maintainer "automated@github.actions" \
-                -C stage "${{ matrix.prefix }}/edit"
+                -C stage usr/local/bin/edit
             mv edit-*.pkg edit-${version}-${{ matrix.pkg_arch }}.pkg
           fi
 
