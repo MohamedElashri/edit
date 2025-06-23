@@ -43,21 +43,21 @@ jobs:
         include:
           # Linux x86_64: use upstream binary
           - os: ubuntu-latest
-            target: x86_64-unknown-linux-gnu
+            arch: x86_64
             pkg: deb
             pkg_arch: amd64
             prefix: /usr/bin
             source: false
           # Linux aarch64: use upstream binary
           - os: ubuntu-latest
-            target: aarch64-unknown-linux-gnu
+            arch: aarch64
             pkg: deb
             pkg_arch: arm64
             prefix: /usr/bin
             source: false
           # macOS Apple Silicon: build from source
           - os: macos-latest
-            target: aarch64-apple-darwin
+            arch: aarch64-apple-darwin
             pkg: osxpkg
             pkg_arch: arm64
             prefix: /usr/local/bin
@@ -74,7 +74,7 @@ jobs:
         run: |
           if [[ "${{ matrix.os }}" == "ubuntu-latest" ]]; then
             sudo apt-get update
-            sudo apt-get install -y ruby-dev build-essential zstd
+            sudo apt-get install -y ruby-dev build-essential zstd jq
             sudo gem install --no-document fpm
           else
             brew install ruby
@@ -89,16 +89,17 @@ jobs:
             git clone --depth 1 --branch "${VERSION}" https://github.com/microsoft/edit.git upstream
             cd upstream
             rustup default nightly
-            rustup target add ${{ matrix.target }}
-            cargo build --release --target ${{ matrix.target }}
-            cp target/${{ matrix.target }}/release/edit \
+            rustup target add ${{ matrix.arch }}
+            cargo build --release --target ${{ matrix.arch }}
+            cp target/${{ matrix.arch }}/release/edit \
                ../stage${{ matrix.prefix }}/
           else
-            url="https://github.com/microsoft/edit/releases/download/${VERSION}/edit-${version}-${{ matrix.pkg_arch }}-linux-gnu.tar.zst"
+            url="https://github.com/microsoft/edit/releases/download/${VERSION}/edit-${version}-${{ matrix.arch }}-linux-gnu.tar.zst"
             curl -L -o edit.tar.zst "$url"
+            mkdir -p stage/usr/bin
             tar --use-compress-program=unzstd -xf edit.tar.zst
-            mv edit stage${{ matrix.prefix }}/edit
-            chmod +x stage${{ matrix.prefix }}/edit
+            mv edit stage/usr/bin/edit
+            chmod +x stage/usr/bin/edit
           fi
 
       - name: Package
