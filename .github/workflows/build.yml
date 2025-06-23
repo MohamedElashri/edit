@@ -34,116 +34,122 @@ jobs:
             echo "new_version=$latest" >> $GITHUB_OUTPUT
           fi
 
-  build:
+  build-debs:
     needs: check-release
     if: needs.check-release.outputs.is_new == 'true'
-    runs-on: ${{ matrix.os }}
+    runs-on: ubuntu-latest
     strategy:
       matrix:
-        include:
-          # Linux x86_64: package upstream binary
-          - os: ubuntu-latest
-            arch: x86_64
-            pkg: deb
-            pkg_arch: amd64
-            prefix: /usr/bin
-            source: false
-          # Linux aarch64: package upstream binary
-          - os: ubuntu-latest
-            arch: aarch64
-            pkg: deb
-            pkg_arch: arm64
-            prefix: /usr/bin
-            source: false
-          # macOS Apple Silicon: build from source
-          - os: macos-latest
-            arch: aarch64-apple-darwin
-            pkg: osxpkg
-            pkg_arch: arm64
-            prefix: /usr/local/bin
-            source: true
-
+        arch: [x86_64, aarch64]
     env:
       VERSION: ${{ needs.check-release.outputs.new_version }}
-
     steps:
-      - name: Checkout this repo
-        uses: actions/checkout@v4
-
-      - name: Install packaging tools
+      - name: Install dependencies
         run: |
-          if [[ "${{ matrix.os }}" == "ubuntu-latest" ]]; then
-            sudo apt-get update
-            sudo apt-get install -y ruby-dev build-essential zstd jq
-            sudo gem install --no-document fpm
-          else
-            brew install ruby zstd
-            gem install --no-document fpm
-          fi
+          sudo apt-get update
+          sudo apt-get install -y ruby-dev build-essential zstd jq
+          sudo gem install --no-document fpm
 
-      - name: Prepare binary
+      - name: Download and extract Edit
         run: |
           version="${VERSION#v}"
-          mkdir -p stage${{ matrix.prefix }}
-          if [ "${{ matrix.source }}" = "true" ]; then
-            git clone --depth 1 --branch "${VERSION}" https://github.com/microsoft/edit.git upstream
-            cd upstream
-            rustup default nightly
-            rustup target add ${{ matrix.arch }}
-            cargo build --release --target ${{ matrix.arch }}
-            cp target/${{ matrix.arch }}/release/edit \
-               ../stage${{ matrix.prefix }}/edit
-          else
-            url="https://github.com/microsoft/edit/releases/download/${VERSION}/edit-${version}-${{ matrix.arch }}-linux-gnu.tar.zst"
-            curl -L -o edit.tar.zst "$url"
-            unzstd -c edit.tar.zst | tar -xf - -C stage${{ matrix.prefix }}
-            chmod +x stage${{ matrix.prefix }}/edit
-          fi
+          url="https://github.com/microsoft/edit/releases/download/${VERSION}/edit-${version}-${{ matrix.arch }}-linux-gnu.tar.zst"
+          curl -L -o edit.tar.zst "$url"
+          mkdir -p stage/usr/bin
+          tar --use-compress-program=unzstd -xf edit.tar.zst
+          mv edit stage/usr/bin/
+          chmod +x stage/usr/bin/edit
 
-      - name: Package
+      - name: Build .deb
         run: |
-          version="${VERSION#v}"
-          if [[ "${{ matrix.pkg }}" == "deb" ]]; then
-            fpm -s dir -t deb \
-                -n edit \
-                -v "$version" \
-                --architecture "${{ matrix.pkg_arch }}" \
-                --prefix /usr \
-                --description "Microsoft Edit CLI editor" \
-                --maintainer "automated@github.actions" \
-                -C stage usr/bin/edit
-            mv edit_*.deb edit-${version}-${{ matrix.pkg_arch }}.deb
-          else
-            # strip leading slash from prefix for fpm path
-            rel_prefix="${{ matrix.prefix#/}}"
-            fpm -s dir -t osxpkg \
-                -n edit \
-                -v "$version" \
-                --architecture "${{ matrix.pkg_arch }}" \
-                --prefix "${{ matrix.prefix }}" \
-                --description "Microsoft Edit CLI editor" \
-                --maintainer "automated@github.actions" \
-                -C stage "${rel_prefix}/edit"
-            mv edit-*.pkg edit-${version}-${{ matrix.pkg_arch }}.pkg
-          fi
+          case "${{ matrix.arch }}" in
+            x86_64) deb_arch=amd64 ;;
+            aarch64) deb_arch=arm64 ;;
+          esac
+          fpm -s dir -t deb \
+              -n edit \
+              -v "${VERSION#v}" \
+              --architecture "$deb_arch" \
+              --prefix /usr \
+              --description "Microsoft Edit CLI editor" \
+              --maintainer "automated@github.actions" \
+              -C stage usr/bin/edit
+          mv edit_*.deb edit-${VERSION#v}-$deb_arch.deb
 
-      - name: Generate SHA256 checksum
+      - name: Generate SHA256 hash
         run: |
-          ext=$( [[ "${{ matrix.pkg }}" == "deb" ]] && echo deb || echo pkg )
-          for file in edit-*."$ext"; do
+          for file in edit-*.deb; do
             sha256sum "$file" > "$file".sha256
           done
 
-      - name: Upload artifacts
+      - name: Upload .deb artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: edit-${{ matrix.pkg }}-${{ matrix.pkg_arch }}
+          name: edit-debs
           path: |
-            edit-*.$( [[ "${{ matrix.pkg }}" == "deb" ]] && echo deb || echo pkg )
+            edit-*.deb
+            *.sha256
+
+  build-macos:
+    needs: check-release
+    if: needs.check-release.outputs.is_new == 'true'
+    runs-on: macos-latest
+    env:
+      VERSION: ${{ needs.check-release.outputs.new_version }}
+    steps:
+      - name: Install dependencies
+        run: |
+          brew update
+          brew install ruby
+          gem install --no-document fpm
+
+      - name: Clone Edit source
+        run: |
+          git clone --depth 1 --branch "${VERSION}" https://github.com/microsoft/edit.git upstream
+
+      - name: Set up Rust (nightly) and build
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: nightly
+          override: true
+      - name: Build release binary
+        working-directory: upstream
+        run: |
+          rustup target add aarch64-apple-darwin
+          cargo build --release --target aarch64-apple-darwin
+
+      - name: Stage binary
+        run: |
+          mkdir -p stage/usr/local/bin
+          cp upstream/target/aarch64-apple-darwin/release/edit stage/usr/local/bin/
+
+      - name: Package .pkg
+        run: |
+          version="${VERSION#v}"
+          fpm -s dir -t osxpkg \
+              -n edit \
+              -v "$version" \
+              --architecture arm64 \
+              --prefix /usr/local \
+              --description "Microsoft Edit CLI editor" \
+              --maintainer "automated@github.actions" \
+              -C stage usr/local/bin/edit
+          mv edit-*.pkg edit-${version}-arm64.pkg
+
+      - name: Generate SHA256 hash
+        run: |
+          sha256sum edit-*.pkg > edit-${VERSION#v}-arm64.pkg.sha256
+
+      - name: Upload .pkg artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: edit-macos
+          path: |
+            edit-*.pkg
             *.sha256
 
   release:
-    needs: [check-release, build]
+    needs: [build-debs, build-macos]
     if: needs.check-release.outputs.is_new == 'true'
     runs-on: ubuntu-latest
     steps:
@@ -170,4 +176,4 @@ jobs:
         with:
           tag_name: ${{ needs.check-release.outputs.new_version }}
           name: "Edit ${{ needs.check-release.outputs.new_version }}"
-          files: all-artifacts/*.deb,all-artifacts/*.pkg,all-artifacts/*.sha256
+          files: all-artifacts/*.*  
