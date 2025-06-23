@@ -149,7 +149,7 @@ jobs:
 
       - name: Create Git tag
         run: |
-          git config user.name "GitHub Actions"
+          git config user.name  "GitHub Actions"
           git config user.email "actions@github.com"
           git tag "${{ needs.check-release.outputs.new_version }}"
           git push origin "${{ needs.check-release.outputs.new_version }}"
@@ -159,4 +159,8 @@ jobs:
         with:
           tag_name: ${{ needs.check-release.outputs.new_version }}
           name:     "Edit ${{ needs.check-release.outputs.new_version }}"
-          files:    all-artifacts/*
+          files:    |
+            all-artifacts/edit-*.deb,
+            all-artifacts/edit-*.deb.sha256,
+            all-artifacts/edit-*-macos-arm64,
+            all-artifacts/edit-*-macos-arm64.sha256
