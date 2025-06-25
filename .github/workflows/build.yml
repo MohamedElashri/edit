@@ -56,10 +56,10 @@ jobs:
           version="${VERSION#v}"
           url="https://github.com/microsoft/edit/releases/download/${VERSION}/edit-${version}-${{ matrix.arch }}-linux-gnu.tar.zst"
           curl -L -o edit.tar.zst "$url"
-          mkdir -p stage/usr/bin
+          mkdir -p stage/bin
           tar --use-compress-program=unzstd -xf edit.tar.zst
-          mv edit stage/usr/bin/
-          chmod +x stage/usr/bin/edit
+          mv edit stage/bin/
+          chmod +x stage/bin/edit
 
       - name: Build .deb
         run: |
@@ -73,7 +73,9 @@ jobs:
               --architecture "$deb_arch" \
               --description "Microsoft Edit CLI editor" \
               --maintainer "automated@github.actions" \
-              -C stage usr/bin/edit
+              -C stage \
+              bin/edit
+          mv edit_*.deb edit-${VERSION#v}-$deb_arch.deb
 
       - name: Generate SHA256 hash
         run: |
@@ -158,7 +160,7 @@ jobs:
           tag_name: ${{ needs.check-release.outputs.new_version }}
           name:     "Edit ${{ needs.check-release.outputs.new_version }}"
           files:    |
-            all-artifacts/edit-*.deb,
-            all-artifacts/edit-*.deb.sha256,
-            all-artifacts/edit-*-macos-arm64,
+            all-artifacts/edit-*.deb
+            all-artifacts/edit-*.deb.sha256
+            all-artifacts/edit-*-macos-arm64
             all-artifacts/edit-*-macos-arm64.sha256
