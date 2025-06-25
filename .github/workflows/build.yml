@@ -71,11 +71,9 @@ jobs:
               -n edit \
               -v "${VERSION#v}" \
               --architecture "$deb_arch" \
-              --prefix /usr \
               --description "Microsoft Edit CLI editor" \
               --maintainer "automated@github.actions" \
               -C stage usr/bin/edit
-          mv edit_*.deb edit-${VERSION#v}-$deb_arch.deb
 
       - name: Generate SHA256 hash
         run: |
